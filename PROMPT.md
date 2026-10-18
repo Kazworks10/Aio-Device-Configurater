@@ -19,9 +19,10 @@ Polling rate applies only to the mouse and keyboard; the headset has none.
 - Read the current settings from each device where the protocol allows it, and show them.
 - Change polling rate, DPI, static RGB, and headset audio settings.
 - Remember my last chosen settings in a config file, with an "Apply saved settings" button.
+- An optional **"Apply my settings when Windows starts"** checkbox (see *Apply at startup* below).
 
 **Out of scope (don't build these, not even partially)**
-- Any background process, tray icon, autostart, or Windows service
+- Anything that keeps running: no tray icon, Windows service, or background watcher. The startup apply runs once and exits.
 - RGB effects (breathing, spectrum, wave), per-key lighting, or synced animations
 - Macros or button remapping
 - Logitech or any other brand
@@ -31,9 +32,18 @@ Polling rate applies only to the mouse and keyboard; the headset has none.
 ## How the app behaves
 
 - **A desktop window only.** I open it, see my devices, change settings, click Apply, and close it. Nothing keeps running after the window closes.
-- When writing Razer settings, use the device's persistent-storage flag (`VARSTORE` in OpenRazer) wherever the device supports it, so settings can survive a replug. If some settings are still lost on unplug or reboot, that's acceptable for v1: write in the README which settings persist on each device. Don't add a background process to work around it without asking me first.
+- When writing Razer settings, use the device's persistent-storage flag (`VARSTORE` in OpenRazer) wherever the device supports it, so settings can survive a replug. Settings that are still lost on reboot are restored by the startup apply below. Write in the README which settings each device keeps by itself and which depend on the startup apply.
 - If Razer Synapse, Razer Central, JBL QuantumENGINE, or their Windows services are running, show a warning banner, because they can overwrite settings or hold the device open.
 - Errors are shown in the UI in plain language: device not found, access denied, device didn't respond, setting not supported. The app never panics on a device error.
+
+### Apply at startup
+
+Some settings may not survive a reboot, so the app can re-apply them when I log in, without staying open:
+
+- The window has a checkbox, off by default: **"Apply my settings when Windows starts"**. Turning it on adds a per-user entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (no admin rights needed), and turning it off removes it. If the `.exe` has moved, update the entry the next time the window opens.
+- The entry runs the same `.exe` with `--apply-saved`. In this mode the app shows no window and no console flash (build with `#![windows_subsystem = "windows"]`). It waits for the saved devices to appear, retrying for up to about 30 seconds because USB devices can show up late after login. Then it applies the saved settings and exits. Devices that aren't there, such as the headset when it's switched off, are skipped rather than waited for.
+- Startup runs have no UI, so write their results to `%APPDATA%\aio-device-configurator\startup.log`, and show the last run's result as one status line in the window.
+- A limitation I accept: if I unplug and replug a device after login, any setting it can't store itself stays lost until I open the app and click "Apply saved settings", or log in again. Don't add a background watcher to fix this.
 
 ## Tech stack
 
@@ -42,6 +52,7 @@ Polling rate applies only to the mouse and keyboard; the headset has none.
 - [`eframe`/`egui`](https://crates.io/crates/eframe) for the GUI
 - `serde` + `toml` for the config at `%APPDATA%\aio-device-configurator\config.toml`
 - `tracing` for logging, `thiserror` / `anyhow` for errors
+- `winreg` for the startup registry entry
 - Ask me before adding any other significant dependency.
 
 ### Workspace layout
@@ -51,7 +62,7 @@ crates/
   core/     Device trait, capability types, errors, Transport trait
   razer/    Razer protocol, plus DeathAdder Elite and Huntsman Mini drivers
   jbl/      JBL Quantum protocol and driver
-  gui/      egui app (the main binary I'll run)
+  gui/      egui app (the main binary I'll run; also handles --apply-saved)
   devtool/  developer CLI: list HID interfaces, send and read raw reports, run single commands
 ```
 
@@ -114,11 +125,13 @@ Do these in order. At the end of each one, stop, tell me exactly what to test on
    *Done when:* same as for the mouse.
 5. **GUI.** Device list, a settings panel per device built from its capabilities, an Apply button, the vendor-app warning, error display, and config save/load with "Apply saved settings".
    *Done when:* I can do everything from milestones 3 and 4 without the command line.
-6. **JBL research.** The capture procedure, my captures, and `docs/jbl-protocol.md`.
+6. **Apply at startup.** The checkbox, the registry entry, the `--apply-saved` mode, the log file, and the status line.
+   *Done when:* with the checkbox on, I reboot, my settings come back without my opening anything, and Task Manager shows nothing still running.
+7. **JBL research.** The capture procedure, my captures, and `docs/jbl-protocol.md`.
    *Done when:* the doc covers RGB and every audio setting the headset handles itself.
-7. **JBL driver.** Static RGB first, then each audio feature the protocol doc confirms, and battery level if it can be read.
-   *Done when:* each setting works from the GUI.
-8. **Release.** A README (install, usage, supported devices, which settings persist after unplug or reboot), the LICENSE file, credits, and a GitHub Actions workflow that builds a Windows `.exe` as a release artifact.
+8. **JBL driver.** Static RGB first, then each audio feature the protocol doc confirms, and battery level if it can be read.
+   *Done when:* each setting works from the GUI and from the startup apply.
+9. **Release.** A README (install, usage, supported devices, which settings each device keeps by itself and which rely on the startup apply), the LICENSE file, credits, and a GitHub Actions workflow that builds a Windows `.exe` as a release artifact.
 
 ## Code quality
 
